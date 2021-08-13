@@ -1,17 +1,18 @@
 import { createHash, randomBytes } from "crypto"
-import { TransactionLimits } from "src/config"
+import { getUserLimits } from "@config/app"
 import {
   InsufficientBalanceError,
   LightningPaymentError,
   SelfPaymentError,
   TransactionRestrictedError,
   ValidationInternalError,
-} from "src/error"
-import { FEECAP } from "src/lndAuth"
-import { getActiveLnd, nodesPubKey } from "src/lndUtils"
-import { baseLogger } from "src/logger"
-import { InvoiceUser, Transaction } from "src/schema"
-import { getHash, sleep } from "src/utils"
+} from "@core/error"
+import { FEECAP } from "@services/lnd/auth"
+import { getActiveLnd, nodesPubKey, getInvoiceAttempt } from "@services/lnd/utils"
+import { baseLogger } from "@services/logger"
+import { ledger } from "@services/mongodb"
+import { InvoiceUser } from "@services/mongoose/schema"
+import { getHash, sleep } from "@core/utils"
 import {
   cancelHodlInvoice,
   checkIsBalanced,
@@ -30,15 +31,13 @@ import {
 const date = Date.now() + 1000 * 60 * 60 * 24 * 8
 // required to avoid oldEnoughForWithdrawal validation
 jest.spyOn(global.Date, "now").mockImplementation(() => new Date(date).valueOf())
-jest.mock("src/realtimePrice", () => require("test/mocks/realtimePrice"))
-jest.mock("src/phone-provider", () => require("test/mocks/phone-provider"))
+jest.mock("@services/realtime-price", () => require("test/mocks/realtime-price"))
+jest.mock("@services/phone-provider", () => require("test/mocks/phone-provider"))
 
 let userWallet0, userWallet1, userWallet2
 let initBalance0, initBalance1
 const amountInvoice = 1000
-const transactionLimits = new TransactionLimits({
-  level: "1",
-})
+const userLimits = getUserLimits({ level: 1 })
 
 beforeAll(async () => {
   userWallet0 = await getUserWallet(0)
@@ -146,6 +145,68 @@ describe("UserWallet - Lightning Pay", () => {
     expect(finalBalance).toBe(initBalance1 - amountInvoice)
   })
 
+  it("filters spam from send to another Galoy user as push payment", async () => {
+    const satsBelow = 100
+    const memoSpamBelowThreshold = "Spam BELOW threshold"
+    const resBelowThreshold = await userWallet1.pay({
+      username: userWallet0.user.username,
+      amount: satsBelow,
+      memo: memoSpamBelowThreshold,
+    })
+
+    const satsAbove = 1100
+    const memoSpamAboveThreshold = "Spam ABOVE threshold"
+    const resAboveThreshold = await userWallet1.pay({
+      username: userWallet0.user.username,
+      amount: satsAbove,
+      memo: memoSpamAboveThreshold,
+    })
+
+    // fetch transactions from db
+    const userTransaction0 = await userWallet0.getTransactions()
+    const transaction0Above = userTransaction0[0]
+    const transaction0Below = userTransaction0[1]
+
+    const userTransaction1 = await userWallet1.getTransactions()
+    const transaction1Above = userTransaction1[0]
+    const transaction1Below = userTransaction1[1]
+
+    // confirm both transactions succeeded
+    expect(resBelowThreshold).toBe("success")
+    expect(resAboveThreshold).toBe("success")
+
+    // check below-threshold transaction for recipient was filtered
+    expect(transaction0Below).toHaveProperty("username", userWallet1.user.username)
+    expect(transaction0Below).toHaveProperty(
+      "description",
+      `from ${userWallet1.user.username}`,
+    )
+    expect(transaction1Below).toHaveProperty("username", userWallet0.user.username)
+    expect(transaction1Below).toHaveProperty("description", memoSpamBelowThreshold)
+
+    // check above-threshold transaction for recipient was NOT filtered
+    expect(transaction0Above).toHaveProperty("username", userWallet1.user.username)
+    expect(transaction0Above).toHaveProperty("description", memoSpamAboveThreshold)
+    expect(transaction1Above).toHaveProperty("username", userWallet0.user.username)
+    expect(transaction1Above).toHaveProperty("description", memoSpamAboveThreshold)
+
+    // check contacts being added
+    userWallet0 = await getUserWallet(0)
+    userWallet1 = await getUserWallet(1)
+
+    expect(userWallet0.user.contacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: userWallet1.user.username }),
+      ]),
+    )
+
+    expect(userWallet1.user.contacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: userWallet0.user.username }),
+      ]),
+    )
+  })
+
   it("fails if sends to self", async () => {
     const invoice = await userWallet1.addInvoice({
       value: amountInvoice,
@@ -208,7 +269,7 @@ describe("UserWallet - Lightning Pay", () => {
   it("fails to pay when withdrawalLimit exceeded", async () => {
     const { request } = await createInvoice({
       lnd: lndOutside1,
-      tokens: transactionLimits.withdrawalLimit() + 1,
+      tokens: userLimits.withdrawalLimit + 1,
     })
     await expect(userWallet1.pay({ invoice: request })).rejects.toThrow(
       TransactionRestrictedError,
@@ -217,7 +278,7 @@ describe("UserWallet - Lightning Pay", () => {
 
   it("fails to pay when amount exceeds onUs limit", async () => {
     const request = await userWallet0.addInvoice({
-      value: transactionLimits.onUsLimit() + 1,
+      value: userLimits.onUsLimit + 1,
     })
     await expect(userWallet1.pay({ invoice: request })).rejects.toThrow(
       TransactionRestrictedError,
@@ -342,7 +403,7 @@ describe("UserWallet - Lightning Pay", () => {
           walletPayer: userWallet2,
         })
 
-        // jest.mock("src/lndAuth", () => ({
+        // jest.mock("@services/lnd/auth", () => ({
         //   // remove first lnd so that ActiveLnd return the second lnd
         //   params: jest
         //     .fn()
@@ -384,7 +445,7 @@ describe("UserWallet - Lightning Pay", () => {
         const { BTC: finalBalance } = await userWallet1.getBalances()
 
         // const { id } = await decodePaymentRequest({ lnd: lndOutside2, request })
-        // const { results: [{ fee }] } = await MainBook.ledger({ account: userWallet1.accountPath, hash: id })
+        // const { results: [{ fee }] } = await getAccountTransactions(userWallet1.accountPath, { hash: id })
         // ^^^^ this fetch the wrong transaction
 
         // TODO: have a way to do this more programatically?
@@ -422,15 +483,12 @@ describe("UserWallet - Lightning Pay", () => {
           }
         })
 
+        const userWallet1Path = userWallet1.user.accountPath
+        const query = { type: "payment", pending: true, voided: false }
+
         await waitFor(async () => {
           await userWallet1.updatePendingPayments()
-          const query = {
-            accounts: userWallet1.user.accountPath,
-            type: "payment",
-            pending: true,
-            voided: false,
-          }
-          const count = await Transaction.countDocuments(query)
+          const count = await ledger.getAccountTransactionsCount(userWallet1Path, query)
           const { is_confirmed } = await getInvoice({ lnd: lndOutside1, id })
           return is_confirmed && count === 0
         })
@@ -457,28 +515,19 @@ describe("UserWallet - Lightning Pay", () => {
         const { BTC: intermediateBalance } = await userWallet1.getBalances()
         expect(intermediateBalance).toBe(initBalance1 - amountInvoice * (1 + initialFee))
 
-        await waitFor(async () => {
-          try {
-            await cancelHodlInvoice({ id, lnd: lndOutside1 })
-            return true
-          } catch (error) {
-            baseLogger.warn({ error }, "cancelHodlInvoice failed. trying again.")
-            return false
-          }
-        })
+        await cancelHodlInvoice({ id, lnd: lndOutside1 })
+
+        const userWallet1Path = userWallet1.user.accountPath
+        const query = { type: "payment", pending: true, voided: false }
 
         await waitFor(async () => {
           await userWallet1.updatePendingPayments()
-          const query = {
-            accounts: userWallet1.user.accountPath,
-            type: "payment",
-            pending: true,
-            voided: false,
-          }
-          const count = await Transaction.countDocuments(query)
-          const { is_canceled } = await getInvoice({ lnd: lndOutside1, id })
-          return is_canceled && count === 0
+          const count = await ledger.getAccountTransactionsCount(userWallet1Path, query)
+          return count === 0
         })
+
+        const invoice = await getInvoiceAttempt({ lnd: lndOutside1, id })
+        expect(invoice).toBeNull()
 
         // wait for balance updates because invoice event
         // arrives before wallet balances updates in lnd

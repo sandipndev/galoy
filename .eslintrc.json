@@ -24,6 +24,7 @@
     "import/no-deprecated": "error",
     "import/no-extraneous-dependencies": "error",
     "import/no-unassigned-import": "error",
+    "import/no-unresolved": "off",
     "no-duplicate-imports": "error",
     "no-empty": ["error", { "allowEmptyCatch": true }],
     "no-empty-function": "error",
@@ -33,7 +34,6 @@
     "no-throw-literal": "error",
     "no-void": "error",
     "@typescript-eslint/no-extra-semi": "off", // Prettier work
-    "require-await": "error",
 
     // Temporarily disabled recommended rules
     "@typescript-eslint/explicit-module-boundary-types": "off",

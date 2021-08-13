@@ -1,4 +1,3 @@
-
 name: "Galoy Banking"
 
 # username of the account that will be used to fund rewards
@@ -43,6 +42,7 @@ test_accounts:
 - phone: "+16505554325" # user4/ funder
   code: 321321
   username: "FunderWallet"
+  role: funder
 - phone: "+16505554326"
   code: 321321
   currencies: [{id: "USD", ratio: 1}]
@@ -63,8 +63,11 @@ test_accounts:
   code: 321321
 - phone: "+16505554333" # user12
   code: 321321
-- phone: "+12223334444" # user42
+- phone: "+12223334444" # user13
   code: "424242"
+- phone: "+16505554334" # user14
+  code: 321321
+  role: "bankowner"
 
 sms_provider: "twilio"
 
@@ -85,6 +88,7 @@ limits:
     points: 30
     duration: 21600 # 60 * 60 * 6 s
     blockDuration: 86400 # 60 * 60 * 24 s
+  memoSharingSatsThreshold: 1000
   oldEnoughForWithdrawal: 172800000 # 1000 * 60 * 60 * 24 * 2, in ms # 2 days
   withdrawal:
     level:
@@ -118,5 +122,9 @@ lnds:
 
 onChainWallet:
   dustThreshold: 5000
+  minConfirmations: 2
 # TODO
 # carrierRegexFilter: ""
+
+helmet:
+  disableContentPolicy: false

@@ -1,11 +1,15 @@
 import { once } from "events"
-import { sleep } from "src/utils"
+import { sleep } from "@core/utils"
 import { filter, first } from "lodash"
-import { MainBook } from "src/mongodb"
-import { yamlConfig } from "src/config"
-import { Transaction } from "src/schema"
-import { getTitle } from "src/notifications/payment"
-import { onchainTransactionEventHandler } from "src/entrypoint/trigger"
+import {
+  getFeeRates,
+  getUserLimits,
+  MS_PER_DAY,
+  getOnChainWalletConfig,
+} from "@config/app"
+import { Transaction } from "@services/mongoose/schema"
+import { getTitle } from "@core/notifications/payment"
+import { onchainTransactionEventHandler } from "@servers/trigger"
 import {
   checkIsBalanced,
   getUserWallet,
@@ -14,12 +18,15 @@ import {
   createChainAddress,
   subscribeToTransactions,
   bitcoindClient,
+  bitcoindOutside,
   mineBlockAndSync,
 } from "test/helpers"
+import { ledger } from "@services/mongodb"
+import { TransactionRestrictedError } from "@core/error"
 
-jest.mock("src/realtimePrice", () => require("test/mocks/realtimePrice"))
-jest.mock("src/phone-provider", () => require("test/mocks/phone-provider"))
-jest.mock("src/notifications/notification")
+jest.mock("@services/realtime-price", () => require("test/mocks/realtime-price"))
+jest.mock("@services/phone-provider", () => require("test/mocks/phone-provider"))
+jest.mock("@core/notifications/notification")
 
 const date = Date.now() + 1000 * 60 * 60 * 24 * 8
 
@@ -29,7 +36,7 @@ let initialBalanceUser0
 let userWallet0, userWallet3, userWallet11, userWallet12 // using userWallet11 and userWallet12 to sendAll
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { sendNotification } = require("src/notifications/notification")
+const { sendNotification } = require("@core/notifications/notification")
 
 beforeAll(async () => {
   userWallet0 = await getUserWallet(0)
@@ -38,6 +45,7 @@ beforeAll(async () => {
   userWallet12 = await getUserWallet(12)
   // load funder wallet before use it
   await getUserWallet(4)
+  await bitcoindClient.loadWallet({ filename: "outside" })
 })
 
 beforeEach(async () => {
@@ -48,8 +56,9 @@ afterEach(async () => {
   await checkIsBalanced()
 })
 
-afterAll(() => {
+afterAll(async () => {
   jest.restoreAllMocks()
+  await bitcoindClient.unloadWallet({ wallet_name: "outside" })
 })
 
 const amount = 10040 // sats
@@ -77,7 +86,7 @@ describe("UserWallet - onChainPay", () => {
     // FIXME: does this syntax always take the first match item in the array? (which is waht we want, items are return as newest first)
     const {
       results: [pendingTxn],
-    } = await MainBook.ledger({ account: userWallet0.accountPath, pending: true })
+    } = await ledger.getAccountTransactions(userWallet0.accountPath, { pending: true })
 
     const { BTC: interimBalance } = await userWallet0.getBalances()
     expect(interimBalance).toBe(initialBalanceUser0 - amount - pendingTxn.fee)
@@ -104,14 +113,18 @@ describe("UserWallet - onChainPay", () => {
     expect(sendNotification.mock.calls[0][0].title).toBe(
       getTitle["onchain_payment"]({ amount }),
     )
+    expect(sendNotification.mock.calls[0][0].user._id).toStrictEqual(userWallet0.user._id)
     expect(sendNotification.mock.calls[0][0].data.type).toBe("onchain_payment")
 
     const {
       results: [{ pending, fee, feeUsd }],
-    } = await MainBook.ledger({ account: userWallet0.accountPath, hash: pendingTxn.hash })
+    } = await ledger.getAccountTransactions(userWallet0.accountPath, {
+      hash: pendingTxn.hash,
+    })
+    const feeRates = getFeeRates()
 
     expect(pending).toBe(false)
-    expect(fee).toBe(yamlConfig.fees.withdraw + 7050)
+    expect(fee).toBe(feeRates.withdrawFeeFixed + 7050)
     expect(feeUsd).toBeGreaterThan(0)
 
     const [txn] = (await userWallet0.getTransactions()).filter(
@@ -149,7 +162,7 @@ describe("UserWallet - onChainPay", () => {
     // FIXME: does this syntax always take the first match item in the array? (which is waht we want, items are return as newest first)
     const {
       results: [pendingTxn],
-    } = await MainBook.ledger({ account: userWallet11.accountPath, pending: true })
+    } = await ledger.getAccountTransactions(userWallet11.accountPath, { pending: true })
 
     const { BTC: interimBalance } = await userWallet11.getBalances()
     expect(interimBalance).toBe(0)
@@ -181,13 +194,13 @@ describe("UserWallet - onChainPay", () => {
 
     const {
       results: [{ pending, fee, feeUsd }],
-    } = await MainBook.ledger({
-      account: userWallet11.accountPath,
+    } = await ledger.getAccountTransactions(userWallet11.accountPath, {
       hash: pendingTxn.hash,
     })
+    const feeRates = getFeeRates()
 
     expect(pending).toBe(false)
-    expect(fee).toBe(yamlConfig.fees.withdraw + 7050) // 7050?
+    expect(fee).toBe(feeRates.withdrawFeeFixed + 7050) // 7050?
     expect(feeUsd).toBeGreaterThan(0)
 
     const [txn] = (await userWallet11.getTransactions()).filter(
@@ -230,7 +243,10 @@ describe("UserWallet - onChainPay", () => {
 
     const {
       results: [{ pending, fee, feeUsd }],
-    } = await MainBook.ledger({ account: userWallet0.accountPath, type: "onchain_on_us" })
+    } = await ledger.getAccountTransactions(userWallet0.accountPath, {
+      type: "onchain_on_us",
+    })
+
     expect(pending).toBe(false)
     expect(fee).toBe(0)
     expect(feeUsd).toBe(0)
@@ -274,10 +290,10 @@ describe("UserWallet - onChainPay", () => {
 
     const {
       results: [{ pending, fee, feeUsd }],
-    } = await MainBook.ledger({
-      account: userWallet12.accountPath,
+    } = await ledger.getAccountTransactions(userWallet12.accountPath, {
       type: "onchain_on_us",
     })
+
     expect(pending).toBe(false)
     expect(fee).toBe(0)
     expect(feeUsd).toBe(0)
@@ -327,7 +343,7 @@ describe("UserWallet - onChainPay", () => {
       format: "p2wpkh",
     })
 
-    const timestampYesterday = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    const timestampYesterday = new Date(Date.now() - MS_PER_DAY)
     const [result] = await Transaction.aggregate([
       {
         $match: {
@@ -339,15 +355,23 @@ describe("UserWallet - onChainPay", () => {
       { $group: { _id: null, outgoingSats: { $sum: "$debit" } } },
     ])
     const { outgoingSats } = result || { outgoingSats: 0 }
-    const amount = yamlConfig.withdrawalLimit - outgoingSats
 
-    await expect(userWallet0.onChainPay({ address, amount })).rejects.toThrow()
+    const userLimits = getUserLimits({ level: userWallet0.user.level })
+    const amount = userLimits.withdrawalLimit - outgoingSats + 1
+
+    await expect(userWallet0.onChainPay({ address, amount })).rejects.toThrow(
+      TransactionRestrictedError,
+    )
   })
 
   it("fails if the amount is less than on chain dust amount", async () => {
-    const address = await bitcoindClient.getNewAddress()
+    const address = await bitcoindOutside.getNewAddress()
+    const onChainWalletConfig = getOnChainWalletConfig()
     expect(
-      userWallet0.onChainPay({ address, amount: yamlConfig.onchainDustAmount - 1 }),
+      userWallet0.onChainPay({
+        address,
+        amount: onChainWalletConfig.dustThreshold - 1,
+      }),
     ).rejects.toThrow()
   })
 })

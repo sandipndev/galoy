@@ -9,9 +9,10 @@ jobs:
   integration:
     name: Integration test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
     - uses: actions/checkout@v2
     - uses: actions/setup-node@v2
     - run: yarn install
     - name: Run integration tests
-      run: make test-in-ci
+      run: docker-compose up -d && make integration-in-ci

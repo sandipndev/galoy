@@ -12,8 +12,9 @@ import {
   Kind,
   GraphQLBoolean,
 } from "graphql"
+import { PubSub } from "graphql-subscriptions"
 
-// ##### GraphQL-related utility functions ####
+export const pubsub = new PubSub()
 
 // GraphQL Types
 export const GT = {
@@ -34,5 +35,5 @@ export const GT = {
   NonNullList: (GraphQLType) => GraphQLNonNull(GraphQLList(GraphQLNonNull(GraphQLType))),
 }
 
-export * from "./core/index"
+export * from "./main/index"
 export * from "./admin/index"

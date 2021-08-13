@@ -1,10 +1,10 @@
-import { yamlConfig } from "src/config"
+import { getGenericLimits, MS_PER_HOUR } from "@config/app"
 import { getUserWallet } from "test/helpers"
-import { setAccountStatus } from "src/AdminOps"
-import { usernameExists } from "src/db/user"
+import { setAccountStatus } from "@core/admin-ops"
+import { usernameExists } from "@domain/user"
 
-jest.mock("src/realtimePrice", () => require("test/mocks/realtimePrice"))
-jest.mock("src/phone-provider", () => require("test/mocks/phone-provider"))
+jest.mock("@services/realtime-price", () => require("test/mocks/realtime-price"))
+jest.mock("@services/phone-provider", () => require("test/mocks/phone-provider"))
 
 let userWallet0, userWallet1, userWallet2
 const username = "user0"
@@ -36,7 +36,9 @@ describe("UserWallet", () => {
     expect(userWallet2.user.oldEnoughForWithdrawal).toBeFalsy()
 
     // in 6 days:
-    const date = Date.now() + yamlConfig.limits.oldEnoughForWithdrawal - 60 * 60 * 1000
+    const genericLimits = getGenericLimits()
+    const date =
+      Date.now() + genericLimits.oldEnoughForWithdrawalMicroseconds - MS_PER_HOUR
 
     jest.spyOn(global.Date, "now").mockImplementationOnce(() => new Date(date).valueOf())
 
@@ -48,7 +50,9 @@ describe("UserWallet", () => {
 
     // TODO make this configurable
     // in 8 days:
-    const date = Date.now() + yamlConfig.limits.oldEnoughForWithdrawal + 60 * 60 * 1000
+    const genericLimits = getGenericLimits()
+    const date =
+      Date.now() + genericLimits.oldEnoughForWithdrawalMicroseconds + MS_PER_HOUR
 
     jest.spyOn(global.Date, "now").mockImplementationOnce(() => new Date(date).valueOf())
 

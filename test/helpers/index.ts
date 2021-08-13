@@ -1,11 +1,8 @@
-import { btc2sat } from "src/utils"
-import {
-  balanceSheetIsBalanced,
-  updateUsersPendingPayment,
-} from "src/ledger/balanceSheet"
+import { btc2sat } from "@core/utils"
+import { balanceSheetIsBalanced, updateUsersPendingPayment } from "@core/balance-sheet"
 import { waitUntilChannelBalanceSyncAll } from "./lightning"
 
-export * from "./bitcoinCore"
+export * from "./bitcoin-core"
 export * from "./lightning"
 export * from "./user"
 

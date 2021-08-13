@@ -1,13 +1,12 @@
-import { getCurrentPrice } from "src/realtimePrice"
-import { sendBalanceToUsers } from "src/entrypoint/dailyBalanceNotification"
-import { customerPath } from "src/ledger/ledger"
-import { MainBook } from "src/mongodb"
-import { User } from "src/schema"
-jest.mock("src/notifications/notification")
+import { getCurrentPrice } from "@services/realtime-price"
+import { sendBalanceToUsers } from "@servers/daily-balance-notification"
+import { User } from "@services/mongoose/schema"
+import { ledger } from "@services/mongodb"
+jest.mock("@core/notifications/notification")
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { sendNotification } = require("src/notifications/notification")
+const { sendNotification } = require("@core/notifications/notification")
 
-jest.mock("src/realtimePrice", () => require("test/mocks/realtimePrice"))
+jest.mock("@services/realtime-price", () => require("test/mocks/realtime-price"))
 
 let price
 
@@ -29,9 +28,8 @@ describe("notification", () => {
       const numActiveUsers = (await User.getActiveUsers()).length
       expect(sendNotification.mock.calls.length).toBe(numActiveUsers)
       for (const [call] of sendNotification.mock.calls) {
-        const { balance } = await MainBook.balance({
-          accounts: customerPath(call.user._id),
-        })
+        const balance = await ledger.getAccountBalance(call.user.accountPath)
+
         const expectedUsdBalance = (price * balance).toLocaleString("en", {
           maximumFractionDigits: 2,
         })

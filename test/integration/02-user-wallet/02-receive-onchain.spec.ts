@@ -1,26 +1,28 @@
 import { once } from "events"
 import { filter } from "lodash"
-import { baseLogger } from "src/logger"
-import { TransactionLimits } from "src/config"
-import { getCurrentPrice } from "src/realtimePrice"
-import { btc2sat, sat2btc, sleep } from "src/utils"
-import { getFunderWallet } from "src/walletFactory"
-import { getTitle } from "src/notifications/payment"
-import { onchainTransactionEventHandler } from "src/entrypoint/trigger"
+import { baseLogger } from "@services/logger"
+import { getUserLimits } from "@config/app"
+import { getCurrentPrice } from "@services/realtime-price"
+import { btc2sat, sat2btc, sleep } from "@core/utils"
+import { getTitle } from "@core/notifications/payment"
+import { onchainTransactionEventHandler } from "@servers/trigger"
 import {
   checkIsBalanced,
   getUserWallet,
   lndonchain,
   RANDOM_ADDRESS,
   waitUntilBlockHeight,
+  sendToAddressAndConfirm,
   subscribeToChainAddress,
   subscribeToTransactions,
   bitcoindClient,
+  bitcoindOutside,
   amountAfterFeeDeduction,
 } from "test/helpers"
+import { getWalletFromRole } from "@core/wallet-factory"
 
-jest.mock("src/realtimePrice", () => require("test/mocks/realtimePrice"))
-jest.mock("src/phone-provider", () => require("test/mocks/phone-provider"))
+jest.mock("@services/realtime-price", () => require("test/mocks/realtime-price"))
+jest.mock("@services/phone-provider", () => require("test/mocks/phone-provider"))
 
 let walletUser0
 let walletUser2
@@ -28,21 +30,21 @@ let walletUser11
 let walletUser12
 let amountBTC
 
-const transactionLimits = new TransactionLimits({
-  level: "1",
-})
+const userLimits = getUserLimits({ level: 1 })
 
-jest.mock("src/notifications/notification")
+jest.mock("@core/notifications/notification")
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { sendNotification } = require("src/notifications/notification")
+const { sendNotification } = require("@core/notifications/notification")
 
 beforeAll(async () => {
   walletUser0 = await getUserWallet(0)
   // load funder wallet before use it
   await getUserWallet(4)
+  await bitcoindClient.loadWallet({ filename: "outside" })
 })
 
 beforeEach(() => {
+  jest.resetAllMocks()
   amountBTC = +(1 + Math.random()).toPrecision(9)
 })
 
@@ -50,13 +52,14 @@ afterEach(async () => {
   await checkIsBalanced()
 })
 
-afterAll(() => {
+afterAll(async () => {
   jest.restoreAllMocks()
+  await bitcoindClient.unloadWallet({ wallet_name: "outside" })
 })
 
 describe("FunderWallet - On chain", () => {
   it("receives on-chain transaction", async () => {
-    const funderWallet = await getFunderWallet({ logger: baseLogger })
+    const funderWallet = await getWalletFromRole({ role: "funder", logger: baseLogger })
     await sendToWallet({ walletDestination: funderWallet })
   })
 })
@@ -68,14 +71,14 @@ describe("UserWallet - On chain", () => {
 
   it("receives on-chain transaction with max limit for withdrawal level1", async () => {
     /// TODO? add sendAll tests in which the user has more than the limit?
-    const level1WithdrawalLimit = transactionLimits.withdrawalLimit() // sats
+    const level1WithdrawalLimit = userLimits.withdrawalLimit // sats
     amountBTC = sat2btc(level1WithdrawalLimit)
     walletUser11 = await getUserWallet(11)
     await sendToWallet({ walletDestination: walletUser11 })
   })
 
   it("receives on-chain transaction with max limit for onUs level1", async () => {
-    const level1OnUsLimit = transactionLimits.onUsLimit() // sats
+    const level1OnUsLimit = userLimits.onUsLimit // sats
     amountBTC = sat2btc(level1OnUsLimit)
     walletUser12 = await getUserWallet(12)
     await sendToWallet({ walletDestination: walletUser12 })
@@ -97,17 +100,23 @@ describe("UserWallet - On chain", () => {
 
     const outputs = [output0, output1]
 
-    const { psbt } = await bitcoindClient.walletCreateFundedPsbt([], outputs)
-    // const decodedPsbt1 = await bitcoindClient.decodePsbt(psbt)
-    // const analysePsbt1 = await bitcoindClient.analyzePsbt(psbt)
-    const walletProcessPsbt = await bitcoindClient.walletProcessPsbt(psbt)
-    // const decodedPsbt2 = await bitcoindClient.decodePsbt(walletProcessPsbt.psbt)
-    // const analysePsbt2 = await bitcoindClient.analyzePsbt(walletProcessPsbt.psbt)
-    const finalizedPsbt = await bitcoindClient.finalizePsbt(walletProcessPsbt.psbt)
+    const { psbt } = await bitcoindOutside.walletCreateFundedPsbt({ inputs: [], outputs })
+    // const decodedPsbt1 = await bitcoindOutside.decodePsbt(psbt)
+    // const analysePsbt1 = await bitcoindOutside.analyzePsbt(psbt)
+    const walletProcessPsbt = await bitcoindOutside.walletProcessPsbt({ psbt })
+    // const decodedPsbt2 = await bitcoindOutside.decodePsbt(walletProcessPsbt.psbt)
+    // const analysePsbt2 = await bitcoindOutside.analyzePsbt(walletProcessPsbt.psbt)
+    const finalizedPsbt = await bitcoindOutside.finalizePsbt({
+      psbt: walletProcessPsbt.psbt,
+    })
 
-    await bitcoindClient.sendRawTransaction(finalizedPsbt.hex)
-    await bitcoindClient.generateToAddress(6, RANDOM_ADDRESS)
+    await bitcoindOutside.sendRawTransaction({ hexstring: finalizedPsbt.hex })
+    await bitcoindOutside.generateToAddress({ nblocks: 6, address: RANDOM_ADDRESS })
     await waitUntilBlockHeight({ lnd: lndonchain })
+
+    // this is done by trigger and/or cron in prod
+    await walletUser0.updateOnchainReceipt()
+    await walletUser4.updateOnchainReceipt()
 
     {
       const { BTC: balance0 } = await walletUser0.getBalances()
@@ -137,7 +146,7 @@ describe("UserWallet - On chain", () => {
 
     await Promise.all([
       once(sub, "chain_transaction"),
-      bitcoindClient.sendToAddress(address, amountBTC),
+      bitcoindOutside.sendToAddress({ address, amount: amountBTC }),
     ])
 
     await sleep(1000)
@@ -164,7 +173,7 @@ describe("UserWallet - On chain", () => {
     )
 
     await Promise.all([
-      bitcoindClient.generateToAddress(3, RANDOM_ADDRESS),
+      bitcoindOutside.generateToAddress({ nblocks: 3, address: RANDOM_ADDRESS }),
       once(sub, "chain_transaction"),
     ])
 
@@ -195,6 +204,7 @@ describe("UserWallet - On chain", () => {
   })
 })
 
+// all must be from outside if is about funding
 async function sendToWallet({ walletDestination }) {
   const lnd = lndonchain
 
@@ -214,7 +224,8 @@ async function sendToWallet({ walletDestination }) {
     sub.removeAllListeners()
 
     await waitUntilBlockHeight({ lnd })
-    await checkIsBalanced()
+    // this is done by trigger and/or cron in prod
+    await walletDestination.updateOnchainReceipt()
 
     const { BTC: balance } = await walletDestination.getBalances()
     expect(balance).toBe(
@@ -241,6 +252,10 @@ async function sendToWallet({ walletDestination }) {
 
   // just to improve performance
   const blockNumber = await bitcoindClient.getBlockCount()
-  await bitcoindClient.sendToAddressAndConfirm(address, amountBTC)
+  await sendToAddressAndConfirm({
+    walletClient: bitcoindOutside,
+    address,
+    amount: amountBTC,
+  })
   await checkBalance(blockNumber)
 }

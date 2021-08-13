@@ -1,5 +1,3 @@
-import { MainBook } from "src/mongodb"
-import { lndFeePath } from "src/ledger/ledger"
 import {
   checkIsBalanced,
   closeChannel,
@@ -15,10 +13,11 @@ import {
   waitFor,
   waitUntilSync,
 } from "test/helpers"
-import { onChannelUpdated, updateEscrows } from "src/lndUtils"
+import { onChannelUpdated, updateEscrows } from "@services/lnd/utils"
+import { ledger } from "@services/mongodb"
 
-jest.mock("src/realtimePrice", () => require("test/mocks/realtimePrice"))
-jest.mock("src/phone-provider", () => require("test/mocks/phone-provider"))
+jest.mock("@services/realtime-price", () => require("test/mocks/realtime-price"))
+jest.mock("@services/phone-provider", () => require("test/mocks/phone-provider"))
 
 //this is the fixed opening and closing channel fee on devnet
 const channelFee = 7637
@@ -57,10 +56,8 @@ describe("Lightning channels", () => {
 
   it("opens channel from lnd1 to lndOutside1", async () => {
     const socket = `lnd-outside-1:9735`
-    const { balance: initFeeInLedger } = await MainBook.balance({
-      account: lndFeePath,
-      currency: "BTC",
-    })
+
+    const initFeeInLedger = await ledger.getBankOwnerBalance()
 
     const { lndNewChannel: channel } = await openChannelTesting({
       lnd: lnd1,
@@ -71,10 +68,7 @@ describe("Lightning channels", () => {
     const { channels } = await getChannels({ lnd: lnd1 })
     expect(channels.length).toEqual(channelLengthMain + 1)
 
-    const { balance: finalFeeInLedger } = await MainBook.balance({
-      account: lndFeePath,
-      currency: "BTC",
-    })
+    const finalFeeInLedger = await ledger.getBankOwnerBalance()
     expect(finalFeeInLedger - initFeeInLedger).toBe(channelFee * -1)
 
     await setChannelFees({ lnd: lnd1, channel, base: 1, rate: 0 })
@@ -99,10 +93,8 @@ describe("Lightning channels", () => {
 
   it("opens channel from lnd1 to lndOutside2", async () => {
     const socket = `lnd-outside-2:9735`
-    const { balance: initFeeInLedger } = await MainBook.balance({
-      account: lndFeePath,
-      currency: "BTC",
-    })
+
+    const initFeeInLedger = await ledger.getBankOwnerBalance()
 
     const { lndNewChannel: channel } = await openChannelTesting({
       lnd: lnd1,
@@ -113,10 +105,7 @@ describe("Lightning channels", () => {
     const { channels } = await getChannels({ lnd: lnd1 })
     expect(channels.length).toEqual(channelLengthMain + 1)
 
-    const { balance: finalFeeInLedger } = await MainBook.balance({
-      account: lndFeePath,
-      currency: "BTC",
-    })
+    const finalFeeInLedger = await ledger.getBankOwnerBalance()
     expect(finalFeeInLedger - initFeeInLedger).toBe(channelFee * -1)
 
     await setChannelFees({ lnd: lnd1, channel, base: 1, rate: 0 })
