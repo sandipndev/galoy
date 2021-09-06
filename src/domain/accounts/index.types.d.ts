@@ -37,6 +37,19 @@ type BusinessMapMarker = {
   mapInfo: BusinessMapInfo
 }
 
+type LimitsChecker = {
+  checkTwoFA({ pendingAmount }: { pendingAmount: Satoshis }): void | LimitsExceededError
+  checkIntraledger({
+    pendingAmount,
+  }: {
+    pendingAmount: Satoshis
+  }): void | LimitsExceededError
+  checkWithdrawal({
+    pendingAmount,
+  }: {
+    pendingAmount: Satoshis
+  }): void | LimitsExceededError
+}
 interface IAccountsRepository {
   findById(accountId: AccountId): Promise<Account | RepositoryError>
   listByUserId(userId: UserId): Promise<Account[] | RepositoryError>
