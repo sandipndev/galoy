@@ -1,5 +1,5 @@
 import { createServer } from "http"
-import { execute, subscribe } from "graphql"
+import { execute, GraphQLError, subscribe } from "graphql"
 import { ApolloError, ApolloServer } from "apollo-server-express"
 import { SubscriptionServer } from "subscriptions-transport-ws"
 import express from "express"
@@ -133,7 +133,8 @@ export const startApolloServer = async ({
           err.extensions?.code,
         ) ||
         isSheildError ||
-        err instanceof ApolloError
+        err instanceof ApolloError ||
+        err instanceof GraphQLError
 
       const reportedError = {
         message: err.message,
