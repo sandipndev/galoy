@@ -153,11 +153,7 @@ export const LedgerService = (): ILedgerService => {
       }
 
       const savedEntry = await entry.commit()
-      return {
-        journalId: savedEntry._id.toString(),
-        voided: savedEntry.voided,
-        transactionIds: savedEntry._transactions.map((id) => id.toString()),
-      }
+      return translateToLedgerJournal(savedEntry)
     } catch (err) {
       return new UnknownLedgerError(err)
     }
@@ -196,11 +192,7 @@ export const LedgerService = (): ILedgerService => {
       }
 
       const savedEntry = await entry.commit()
-      return {
-        journalId: savedEntry._id.toString(),
-        voided: savedEntry.voided,
-        transactionIds: savedEntry._transactions.map((id) => id.toString()),
-      }
+      return translateToLedgerJournal(savedEntry)
     } catch (err) {
       return new UnknownLedgerError(err)
     }
@@ -230,11 +222,7 @@ export const LedgerService = (): ILedgerService => {
         .debit(lndAccountingPath, sats, metadata)
 
       const savedEntry = await entry.commit()
-      return {
-        journalId: savedEntry._id.toString(),
-        voided: savedEntry.voided,
-        transactionIds: savedEntry._transactions.map((id) => id.toString()),
-      }
+      return translateToLedgerJournal(savedEntry)
     } catch (err) {
       return new UnknownLedgerError(err)
     }
@@ -242,27 +230,20 @@ export const LedgerService = (): ILedgerService => {
 
   const sendLnTx = async ({
     liabilitiesAccountId,
-    recipientLiabilitiesAccountId,
     paymentHash,
     description,
     sats,
     fee,
     usd,
     usdFee,
-    type,
-    pending,
     pubkey,
     feeKnownInAdvance,
-    payerWalletName,
-    recipientWalletName,
-    memoPayer,
-    isPushPayment,
   }: SendLnTxArgs): Promise<LedgerJournal | LedgerError> => {
     let metadata: SendLnTxMetadata
     try {
       metadata = {
-        type,
-        pending,
+        type: LedgerTransactionType.Payment,
+        pending: true,
         hash: paymentHash,
         fee,
         feeUsd: usdFee,
@@ -273,6 +254,48 @@ export const LedgerService = (): ILedgerService => {
         currency: "BTC",
       }
 
+      const entry = MainBook.entry(description)
+
+      entry
+        .credit(lndAccountingPath, sats, metadata)
+        .debit(liabilitiesAccountId, sats, metadata)
+
+      const savedEntry = await entry.commit()
+      return translateToLedgerJournal(savedEntry)
+    } catch (err) {
+      return new UnknownLedgerError(err)
+    }
+  }
+
+  const sendIntraledgerTx = async ({
+    liabilitiesAccountId,
+    paymentHash,
+    description,
+    sats,
+    fee,
+    usd,
+    usdFee,
+    pubkey,
+    recipientLiabilitiesAccountId,
+    payerWalletName,
+    recipientWalletName,
+    memoPayer,
+    isPushPayment,
+  }: SendIntraledgerTxArgs): Promise<LedgerJournal | LedgerError> => {
+    const metadata: SendIntraledgerTxMetadata = {
+      type: LedgerTransactionType.IntraLedger,
+      pending: false,
+      hash: paymentHash,
+      fee,
+      feeUsd: usdFee,
+      sats,
+      usd,
+      pubkey,
+      memoPayer: null,
+      username: null,
+      currency: "BTC",
+    }
+    try {
       const creditMetadata = { ...metadata }
       if (payerWalletName) {
         creditMetadata.memoPayer = isPushPayment ? memoPayer : null
@@ -285,19 +308,13 @@ export const LedgerService = (): ILedgerService => {
       }
 
       const entry = MainBook.entry(description)
-      const creditAccountingPath =
-        recipientLiabilitiesAccountId || (lndAccountingPath as LiabilitiesAccountId)
 
       entry
-        .credit(creditAccountingPath, sats, creditMetadata)
+        .credit(recipientLiabilitiesAccountId, sats, creditMetadata)
         .debit(liabilitiesAccountId, sats, debitMetadata)
 
       const savedEntry = await entry.commit()
-      return {
-        journalId: savedEntry._id.toString(),
-        voided: savedEntry.voided,
-        transactionIds: savedEntry._transactions.map((id) => id.toString()),
-      }
+      return translateToLedgerJournal(savedEntry)
     } catch (err) {
       return new UnknownLedgerError(err)
     }
@@ -339,6 +356,7 @@ export const LedgerService = (): ILedgerService => {
     receiveLnTx,
     receiveLnFeeReimbursement,
     sendLnTx,
+    sendIntraledgerTx,
     settlePendingLiabilityTransactions,
     voidLedgerTransactionsForJournal,
   }
@@ -364,4 +382,10 @@ const translateToLedgerTx = (tx): LedgerTransaction => ({
   addresses: tx.payee_addresses,
   txId: tx.hash,
   feeKnownInAdvance: tx.feeKnownInAdvance || false,
+})
+
+const translateToLedgerJournal = (savedEntry): LedgerJournal => ({
+  journalId: savedEntry._id.toString(),
+  voided: savedEntry.voided,
+  transactionIds: savedEntry._transactions.map((id) => id.toString()),
 })
