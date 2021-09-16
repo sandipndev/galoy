@@ -7,7 +7,13 @@ import {
   InvoiceNotFoundError,
   PaymentStatus,
 } from "@domain/bitcoin/lightning"
-import { createInvoice, getInvoice, getPayment, GetPaymentResult } from "lightning"
+import {
+  createInvoice,
+  getInvoice,
+  getPayment,
+  GetPaymentResult,
+  deleteFailedPayAttempts,
+} from "lightning"
 import { getActiveLnd, getLndFromPubkey } from "./utils"
 
 export const LndService = (): ILightningService | LightningServiceError => {
@@ -102,5 +108,6 @@ export const LndService = (): ILightningService | LightningServiceError => {
     registerInvoice,
     lookupInvoice,
     lookupPayment,
+    deleteFailedPayAttempts,
   }
 }
