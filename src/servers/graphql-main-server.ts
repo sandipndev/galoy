@@ -29,6 +29,8 @@ export async function startApolloServerForCoreSchema() {
 
         deviceNotificationTokenCreate: isAuthenticated,
 
+        accountApiKeyCreate: isAuthenticated,
+
         lnInvoiceFeeProbe: isAuthenticated,
         lnNoAmountInvoiceFeeProbe: isAuthenticated,
 
