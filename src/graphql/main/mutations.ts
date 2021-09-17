@@ -23,6 +23,7 @@ import UserQuizQuestionsUpdateCompletedMutation from "@graphql/root/mutation/use
 import OnChainPaymentSendMutation from "@graphql/root/mutation/onchain-payment-send"
 import OnChainPaymentSendAllMutation from "@graphql/root/mutation/onchain-payment-send-all"
 import AccountApiKeyCreateMutation from "@graphql/root/mutation/account-api-key-create"
+import AccountApiKeyDisableMutation from "@graphql/root/mutation/account-api-key-disable"
 
 const MutationType = new GT.Object({
   name: "Mutation",
@@ -38,6 +39,7 @@ const MutationType = new GT.Object({
     deviceNotificationTokenCreate: DeviceNotificationTokenCreateMutation,
 
     accountApiKeyCreate: AccountApiKeyCreateMutation,
+    accountApiKeyDisable: AccountApiKeyDisableMutation,
 
     userUpdateLanguage: UserUpdateLanguageMutation,
     walletContactUpdateAlias: WalletContactUpdateAliasMutation,
