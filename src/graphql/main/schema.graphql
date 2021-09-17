@@ -246,6 +246,7 @@ type Query {
   mobileVersions: [MobileVersions]
   quizQuestions: [QuizQuestion]
   btcPriceList(range: PriceGraphRange!): [PricePoint]
+  accountApiKeys: [AccountApiKeyHashed]
 }
 
 type Globals {
@@ -358,6 +359,16 @@ enum PriceGraphRange {
   FIVE_YEARS
 }
 
+type AccountApiKeyHashed {
+  label: AccountApiKeyLabel!
+  expireAt: Timestamp!
+}
+
+"""
+Identifier of an account api key
+"""
+scalar AccountApiKeyLabel
+
 type Mutation {
   userRequestAuthCode(input: UserRequestAuthCodeInput!): SuccessPayload!
   userLogin(input: UserLoginInput!): AuthTokenPayload!
@@ -467,11 +478,6 @@ type AccountApiKey {
   secret: String!
   expireAt: Timestamp!
 }
-
-"""
-Identifier of an account api key
-"""
-scalar AccountApiKeyLabel
 
 input AccountApiKeyCreateInput {
   label: AccountApiKeyLabel

@@ -17,6 +17,7 @@ export async function startApolloServerForCoreSchema() {
     {
       Query: {
         me: isAuthenticated,
+        accountApiKeys: isAuthenticated,
       },
       Mutation: {
         userQuizQuestionsUpdateCompleted: isAuthenticated,

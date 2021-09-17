@@ -7,6 +7,7 @@ import BusinessMapMarkersQuery from "@graphql/root/query/business-map-markers"
 import MobileVersionsQuery from "@graphql/root/query/mobile-versions"
 import QuizQuestionsQuery from "@graphql/root/query/quiz-questions"
 import BtcPriceListQuery from "@graphql/root/query/btc-price-list"
+import AccountApiKeysQuery from "@graphql/root/query/account-api-keys"
 
 const QueryType = new GT.Object({
   name: "Query",
@@ -18,6 +19,7 @@ const QueryType = new GT.Object({
     mobileVersions: MobileVersionsQuery,
     quizQuestions: QuizQuestionsQuery,
     btcPriceList: BtcPriceListQuery,
+    accountApiKeys: AccountApiKeysQuery,
   }),
 })
 
