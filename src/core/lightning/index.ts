@@ -26,6 +26,7 @@ import { lockExtendOrThrow, redlock } from "../lock"
 import { transactionNotification } from "@services/notifications/payment"
 import { UserWallet } from "../user-wallet"
 import { addContact, isInvoiceAlreadyPaidError, timeout } from "../utils"
+import { addNewWalletContact } from "@app/users"
 
 export type ITxType =
   | "invoice"
@@ -344,9 +345,11 @@ export const LightningMixin = (superclass) =>
           }
 
           // adding contact for the payer
-          if (payeeUser.username) {
-            await addContact({ uid: this.user._id, username: payeeUser.username })
-          }
+          const addContactResult = await addNewWalletContact({
+            userId: this.user.id,
+            contactWalletId: payeeUser.id,
+          })
+          if (addContactResult instanceof Error) throw addContactResult
 
           // adding contact for the payee
           if (this.user.username) {
