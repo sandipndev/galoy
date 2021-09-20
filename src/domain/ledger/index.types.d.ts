@@ -80,6 +80,11 @@ type DepositFeeCalculator = {
   lnDepositFee(): Satoshis
 }
 
+type WithdrawalFeeCalculator = {
+  onChainFee(fee: Satoshis): Satoshis
+  onChainIntraLedgerFee(): Satoshis
+}
+
 type FeeReimbursement = {
   getReimbursement({ actualFee }: { actualFee: Satoshis }): Satoshis | null
 }
