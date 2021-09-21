@@ -5,7 +5,7 @@ import { verifyToken } from "node-2fa"
 
 import * as Wallets from "@app/wallets"
 import { TIMEOUT_PAYMENT } from "@services/lnd/auth"
-import { WalletInvoicesRepository } from "@services/mongoose"
+import { WalletInvoicesRepository, WalletsRepository } from "@services/mongoose"
 import { getActiveLnd, getLndFromPubkey, isMyNode, validate } from "@services/lnd/utils"
 import { ledger } from "@services/mongodb"
 import { redis } from "@services/redis"
@@ -26,6 +26,11 @@ import { lockExtendOrThrow, redlock } from "../lock"
 import { transactionNotification } from "@services/notifications/payment"
 import { UserWallet } from "../user-wallet"
 import { addContact, isInvoiceAlreadyPaidError, timeout } from "../utils"
+import { PriceService } from "@services/price"
+import { toSats } from "@domain/bitcoin"
+import { toLiabilitiesAccountId } from "@domain/ledger"
+import { LedgerService } from "@services/ledger"
+import { CouldNotFindError } from "@domain/errors"
 
 export type ITxType =
   | "invoice"
@@ -291,19 +296,40 @@ export const LightningMixin = (superclass) =>
             })
           }
 
-          await lockExtendOrThrow({ lock, logger: lightningLoggerOnUs }, async () => {
-            const tx = await ledger.addOnUsPayment({
-              description: memoInvoice,
-              sats,
-              metadata,
-              payerUser: this.user,
-              payeeUser,
-              memoPayer,
-              shareMemoWithPayee: isPushPayment,
-              lastPrice: UserWallet.lastPrice,
-            })
-            return tx
-          })
+          const price = await PriceService().getCurrentPrice()
+          if (price instanceof Error) throw price
+          const lnFee = toSats(0)
+          const usd = sats * price
+          const usdFee = lnFee * price
+
+          const payerWallet = await WalletsRepository().findById(this.user.id)
+          if (payerWallet instanceof CouldNotFindError) throw payerWallet
+          if (payerWallet instanceof Error) throw payerWallet
+          const recipientWallet = await WalletsRepository().findById(payeeUser.id)
+          if (recipientWallet instanceof CouldNotFindError) throw recipientWallet
+          if (recipientWallet instanceof Error) throw recipientWallet
+
+          const journal = await lockExtendOrThrow(
+            { lock, logger: lightningLoggerOnUs },
+            async () => {
+              return LedgerService().sendLnIntraledgerTx({
+                liabilitiesAccountId: toLiabilitiesAccountId(this.user.id),
+                paymentHash: id,
+                description: memoInvoice,
+                sats,
+                fee: lnFee,
+                usd,
+                usdFee,
+                pubkey,
+                recipientLiabilitiesAccountId: toLiabilitiesAccountId(payeeUser.id),
+                payerWalletName: payerWallet.walletName,
+                recipientWalletName: recipientWallet.walletName,
+                memoPayer: memoPayer || null,
+                shareMemoWithPayee: isPushPayment,
+              })
+            },
+          )
+          if (journal instanceof Error) throw journal
 
           transactionNotification({
             amount: sats,
