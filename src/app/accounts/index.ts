@@ -2,11 +2,27 @@ export * from "./add-api-key-for-account"
 export * from "./get-api-keys-for-account"
 export * from "./disable-api-key-for-account"
 
-import { AccountsRepository } from "@services/mongoose"
+import { hashApiKey } from "@domain/accounts"
+import { AccountsRepository, AccountApiKeysRepository } from "@services/mongoose"
 
 export const getAccount = async (accountId: AccountId) => {
   const accounts = AccountsRepository()
   return accounts.findById(accountId)
+}
+
+export const getAccountByApiKey = async (
+  key: string,
+  secret: string,
+): Promise<Account | ApplicationError> => {
+  const hashedKey = await hashApiKey({ key, secret })
+  if (hashedKey instanceof Error) return hashedKey
+
+  const accountApiKeysRepository = AccountApiKeysRepository()
+  const accountApiKey = await accountApiKeysRepository.findByHashedKey(hashedKey)
+  if (accountApiKey instanceof Error) return accountApiKey
+
+  const accountRepo = AccountsRepository()
+  return accountRepo.findById(accountApiKey.accountId)
 }
 
 export const hasPermissions = async (
